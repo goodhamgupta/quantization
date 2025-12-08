@@ -23,50 +23,58 @@ def load_vidore_calibration(processor, num_samples: int = 8, specific_indices=No
     """
     print(f"\nLoading Vidore calibration data...")
 
-    # Load dataset
-    ds = load_dataset("vidore/colpali_train_set", split="train", streaming=False)
-
-    # Select samples
-    if specific_indices:
-        selected = ds.select(specific_indices)
-        print(f"  Using specific indices: {specific_indices}")
-    else:
-        selected = ds.select(range(min(num_samples, len(ds))))
-        print(f"  Using first {len(selected)} samples")
-
-    # Convert to pandas for easier access
-    batch = selected.to_pandas()[["question", "positive"]]
-
     # Process samples
     calibration_data = []
-    for idx, row in batch.iterrows():
-        question = row["question"]
 
-        # Option 1: Use question only (simplest)
-        text = question
+    if specific_indices:
+        # If specific indices are requested, load only those
+        print(f"  Loading specific indices: {specific_indices}")
+        ds = load_dataset("vidore/colpali_train_set", split="train", streaming=False)
+        selected = ds.select(specific_indices)
 
-        # Option 2: Include OCR text from document if available
-        # Uncomment if you want to include document text:
-        # if "text" in row["positive"]:
-        #     doc_text = row["positive"]["text"][:500]  # Limit length
-        #     text = f"{question} [DOC] {doc_text}"
+        for idx, sample in enumerate(selected):
+            query = sample["query"]
+            text =query 
 
-        # Process through model processor
-        inputs = processor(
-            text=text,
-            return_tensors="pt",
-            padding="max_length",
-            max_length=256,
-            truncation=True
-        )
+            # Process through model processor
+            inputs = processor(
+                text=text,
+                return_tensors="pt",
+                padding="max_length",
+                max_length=256,
+                truncation=True
+            )
 
-        calibration_data.append({
-            'input_ids': inputs['input_ids'].squeeze(0),
-            'attention_mask': inputs['attention_mask'].squeeze(0),
-            'source': f"vidore_{idx}"
-        })
+            calibration_data.append({
+                'input_ids': inputs['input_ids'].squeeze(0),
+                'attention_mask': inputs['attention_mask'].squeeze(0),
+                'source': f"vidore_{specific_indices[idx]}"
+            })
 
-        print(f"    [{idx}] {question[:60]}...")
+            print(f"    [{specific_indices[idx]}] {query[:60]}...")
+    else:
+        print(f"  Streaming first {num_samples} samples ")
+        ds = load_dataset("vidore/colpali_train_set", split="train", streaming=True)
+
+        for idx, sample in enumerate(ds.take(num_samples)):
+            query = sample["query"]
+            text =query 
+
+            inputs = processor(
+                text=text,
+                return_tensors="pt",
+                padding="max_length",
+                max_length=256,
+                truncation=True
+            )
+
+            calibration_data.append({
+                'input_ids': inputs['input_ids'].squeeze(0),
+                'attention_mask': inputs['attention_mask'].squeeze(0),
+                'source': f"vidore_{idx}"
+            })
+
+            print(f"    [{idx}] {query[:60]}...")
 
     print(f"✓ Loaded {len(calibration_data)} calibration samples from Vidore")
     return calibration_data
@@ -102,20 +110,19 @@ def quantize_colqwen3(
     lang_modules = [n for n, _ in model.named_modules() if "language_model" in n]
     print(f"  Language model modules: {len(lang_modules)}")
 
-    # Load processor
-    print(f"\nLoading processor...")
+    # Load processor and tokenizer
+    print(f"\nLoading processor and tokenizer...")
     processor = AutoProcessor.from_pretrained(
         model_path,
         trust_remote_code=True
     )
-    print(f"✓ Processor loaded")
+    # Extract tokenizer from processor (required for multimodal models in AutoRound)
+    tokenizer = processor.tokenizer if hasattr(processor, 'tokenizer') else processor
+    print(f"✓ Processor and tokenizer loaded")
 
-    # Load real Vidore calibration data
-    calib_data = load_vidore_calibration(
-        processor,
-        num_samples=nsamples,
-        specific_indices=vidore_indices
-    )
+    # Note: For MLLM mode, AutoRound handles calibration internally using the processor/tokenizer
+    # We could optionally load Vidore data here, but AutoRound uses its own calibration mechanism
+    # If you want to use custom calibration data, you'd need to pass a dataset string to AutoRound constructor
 
     # Build layer config - ONLY quantize language_model layers
     print("\n=== Building Layer Config ===")
@@ -137,67 +144,30 @@ def quantize_colqwen3(
     print(f"  - Quantize to {w_bit}-bit: {quant_layers} layers")
     print(f"  - Keep FP16: {fp16_layers} layers")
 
-    # Build dataloader for calibration
-    def calib_dataloader():
-        """Yield calibration samples in the format AutoRound expects."""
-        device = next(model.parameters()).device
-        for sample in calib_data[:nsamples]:
-            yield {
-                'input_ids': sample['input_ids'].unsqueeze(0).to(device),
-                'attention_mask': sample['attention_mask'].unsqueeze(0).to(device)
-            }
-
-    # Convert generator to list for AutoRound
-    dataloader = list(calib_dataloader())
-    print(f"✓ Calibration dataloader ready with {len(dataloader)} samples")
-
-    # Initialize Auto-Round with proper config
     print("\n=== Initializing Auto-Round ===")
     print(f"Config: W{w_bit}A16, group_size={group_size}, iters={iters}")
 
-    try:
-        autoround = AutoRound(
-            model=model,
-            tokenizer=None,
-            bits=w_bit,
-            group_size=group_size,
-            scheme="asym",
-            nsamples=nsamples,
-            iters=iters,
-            seqlen=256,
-            batch_size=1,
-            layer_config=layer_config,  # Pass layer config
-            device=str(next(model.parameters()).device)
-        )
+    autoround = AutoRound(
+        model=model,
+        tokenizer=tokenizer,  # Required for multimodal models
+        processor=processor,   # Pass processor for MLLM mode
+        bits=w_bit,
+        group_size=group_size,
+        scheme="W4A16",
+        nsamples=nsamples,
+        iters=iters,
+        seqlen=256,
+        batch_size=1,
+        layer_config=layer_config,  # Pass layer config
+        device_map="auto"
+    )
 
-        # Run quantization with Vidore calibration data
-        print("\n" + "=" * 80)
-        print("Starting quantization with Vidore calibration data...")
-        print("=" * 80)
+    print("\n" + "=" * 80)
+    print("Starting quantization...")
+    print("=" * 80)
 
-        autoround.quantize(calib_data=dataloader)
-        print("\n✓ Quantization completed!")
-
-    except Exception as e:
-        print(f"\n⚠️  Standard approach failed: {e}")
-        print("Trying fallback: RTN mode for VLMs (iters=0, smaller group_size)...")
-
-        # Fallback for tricky VLM architectures
-        autoround = AutoRound(
-            model=model,
-            tokenizer=None,
-            bits=w_bit,
-            group_size=32,  # Smaller for VLMs
-            scheme="asym",
-            nsamples=nsamples,
-            iters=0,  # RTN mode (no tuning)
-            seqlen=256,
-            batch_size=1,
-            layer_config=layer_config,
-            device='cuda:0'
-        )
-        autoround.quantize()
-        print("✓ Fallback quantization completed")
+    autoround.quantize()
+    print("\n✓ Quantization completed!")
 
     # Save quantized model
     output_dir = Path(output_dir)
