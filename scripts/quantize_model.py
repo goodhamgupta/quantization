@@ -90,7 +90,7 @@ def quantize_colqwen3(
     model = AutoModel.from_pretrained(
         model_path,
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto"
     )
     print(f"✓ Model loaded")
@@ -109,18 +109,9 @@ def quantize_colqwen3(
     tokenizer = processor.tokenizer if hasattr(processor, 'tokenizer') else processor
     print(f"✓ Processor and tokenizer loaded")
 
-    # Load MULTIMODAL calibration data (image + query pairs)
-    # This is critical for an EMBEDDING VLM model
-    print("\n" + "=" * 80)
-    print("IMPORTANT: Loading MULTIMODAL calibration data")
-    print("This is an EMBEDDING VLM - must use image + query pairs!")
-    print("=" * 80)
-
-    calibration_samples = load_vidore_calibration_multimodal(
-        processor,
-        num_samples=nsamples,
-        specific_indices=vidore_indices
-    )
+    # Note: Calibration is handled automatically by AutoRound
+    # It will use the default text-only calibration dataset (NeelNanda/pile-10k)
+    # This is appropriate since we're only quantizing the language_model component
 
     # Build layer config - ONLY quantize language_model layers
     print("\n=== Building Layer Config ===")
@@ -145,17 +136,19 @@ def quantize_colqwen3(
     print("\n=== Initializing Auto-Round ===")
     print(f"Config: W{w_bit}A16, group_size={group_size}, iters={iters}")
 
-    print("\n✅ MULTIMODAL CALIBRATION CONFIGURED:")
-    print("  - Using liuhaotian/llava_conv_58k dataset (58k image+text pairs)")
-    print("  - AutoRound will use processor for multimodal inputs")
-    print("  - This ensures vision encoder + language model calibration")
-    print("  - Default text-only calibration (pile-10k) explicitly AVOIDED")
+    print("\n✅ CALIBRATION CONFIGURED:")
+    print("  - Using AutoRound's default text-only calibration (NeelNanda/pile-10k)")
+    print("  - This is appropriate because:")
+    print("    * Only quantizing language_model layers (text component)")
+    print("    * Vision encoder kept in FP16 (no quantization)")
+    print("  - AutoRound will use processor for MLLM mode")
 
     autoround = AutoRound(
         model=model,
         tokenizer=tokenizer,  # Required for multimodal models
         processor=processor,   # Pass processor for MLLM mode
-        dataset="liuhaotian/llava_conv_58k",  # ✅ CRITICAL: Use MULTIMODAL dataset!
+        # Use default text-only calibration (NeelNanda/pile-10k)
+        # This is appropriate since we're only quantizing the language model
         bits=w_bit,
         group_size=group_size,
         scheme="W4A16",
@@ -169,8 +162,8 @@ def quantize_colqwen3(
 
     print("\n" + "=" * 80)
     print("Starting quantization...")
-    print("Using MULTIMODAL calibration: liuhaotian/llava_conv_58k")
-    print("(Image + text pairs will calibrate vision encoder + language model)")
+    print("Using text-only calibration (default: NeelNanda/pile-10k)")
+    print("(Language model will be calibrated and quantized to 4-bit)")
     print("=" * 80)
 
     autoround.quantize()
@@ -198,12 +191,12 @@ def quantize_colqwen3(
         "group_size": group_size,
         "iters": iters,
         "nsamples": nsamples,
-        "calibration_dataset": "liuhaotian/llava_conv_58k",
-        "calibration_type": "multimodal (image + text pairs)",
+        "calibration_dataset": "NeelNanda/pile-10k (AutoRound default)",
+        "calibration_type": "text-only (language model only)",
         "quantized_layers": quant_layers,
         "fp16_layers": fp16_layers,
         "original_model": model_path,
-        "note": "Vision encoder kept in FP16 for quality preservation"
+        "note": "Vision encoder kept in FP16 (not quantized). Text-only calibration is appropriate since only language_model is quantized."
     }
 
     with open(output_dir / "quantization_metadata.json", 'w') as f:
