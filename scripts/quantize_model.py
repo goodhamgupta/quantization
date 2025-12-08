@@ -9,22 +9,25 @@ from pathlib import Path
 import json
 
 
-def load_vidore_calibration(processor, num_samples: int = 8, specific_indices=None):
+def load_vidore_calibration_multimodal(processor, num_samples: int = 8, specific_indices=None):
     """
-    Load real calibration data from Vidore ColPali training set.
+    Load MULTIMODAL calibration data from Vidore ColPali training set.
+
+    This is an EMBEDDING VLM model - it processes both images and text queries
+    to produce embeddings for document retrieval.
 
     Args:
-        processor: Model processor for tokenization
+        processor: Model processor for multimodal inputs
         num_samples: Number of samples to use (default: 8)
         specific_indices: Optional list of specific row indices to use (e.g., [51])
 
     Returns:
-        List of calibration samples ready for AutoRound
+        List of multimodal calibration samples (image + query pairs)
     """
-    print(f"\nLoading Vidore calibration data...")
+    print(f"\nLoading Vidore MULTIMODAL calibration data (image + query pairs)...")
 
     # Process samples
-    calibration_data = []
+    calibration_samples = []
 
     if specific_indices:
         # If specific indices are requested, load only those
@@ -34,50 +37,36 @@ def load_vidore_calibration(processor, num_samples: int = 8, specific_indices=No
 
         for idx, sample in enumerate(selected):
             query = sample["query"]
-            text =query 
+            image = sample["image"]  # PIL Image
 
-            # Process through model processor
-            inputs = processor(
-                text=text,
-                return_tensors="pt",
-                padding="max_length",
-                max_length=256,
-                truncation=True
-            )
-
-            calibration_data.append({
-                'input_ids': inputs['input_ids'].squeeze(0),
-                'attention_mask': inputs['attention_mask'].squeeze(0),
+            # Store raw data - processor will be called during quantization
+            calibration_samples.append({
+                'query': query,
+                'image': image,
                 'source': f"vidore_{specific_indices[idx]}"
             })
 
             print(f"    [{specific_indices[idx]}] {query[:60]}...")
     else:
-        print(f"  Streaming first {num_samples} samples ")
+        print(f"  Streaming first {num_samples} samples (efficient loading)")
         ds = load_dataset("vidore/colpali_train_set", split="train", streaming=True)
 
         for idx, sample in enumerate(ds.take(num_samples)):
             query = sample["query"]
-            text =query 
+            image = sample["image"]  # PIL Image
 
-            inputs = processor(
-                text=text,
-                return_tensors="pt",
-                padding="max_length",
-                max_length=256,
-                truncation=True
-            )
-
-            calibration_data.append({
-                'input_ids': inputs['input_ids'].squeeze(0),
-                'attention_mask': inputs['attention_mask'].squeeze(0),
+            # Store raw data - processor will be called during quantization
+            calibration_samples.append({
+                'query': query,
+                'image': image,
                 'source': f"vidore_{idx}"
             })
 
-            print(f"    [{idx}] {query[:60]}...")
+            print(f"    [{idx}] Q: {query[:50]}... | Image: {image.size}")
 
-    print(f"✓ Loaded {len(calibration_data)} calibration samples from Vidore")
-    return calibration_data
+    print(f"✓ Loaded {len(calibration_samples)} MULTIMODAL calibration samples from Vidore")
+    print(f"  (Each sample contains: query text + document image)")
+    return calibration_samples
 
 
 def quantize_colqwen3(
@@ -120,9 +109,18 @@ def quantize_colqwen3(
     tokenizer = processor.tokenizer if hasattr(processor, 'tokenizer') else processor
     print(f"✓ Processor and tokenizer loaded")
 
-    # Note: For MLLM mode, AutoRound handles calibration internally using the processor/tokenizer
-    # We could optionally load Vidore data here, but AutoRound uses its own calibration mechanism
-    # If you want to use custom calibration data, you'd need to pass a dataset string to AutoRound constructor
+    # Load MULTIMODAL calibration data (image + query pairs)
+    # This is critical for an EMBEDDING VLM model
+    print("\n" + "=" * 80)
+    print("IMPORTANT: Loading MULTIMODAL calibration data")
+    print("This is an EMBEDDING VLM - must use image + query pairs!")
+    print("=" * 80)
+
+    calibration_samples = load_vidore_calibration_multimodal(
+        processor,
+        num_samples=nsamples,
+        specific_indices=vidore_indices
+    )
 
     # Build layer config - ONLY quantize language_model layers
     print("\n=== Building Layer Config ===")
@@ -147,10 +145,17 @@ def quantize_colqwen3(
     print("\n=== Initializing Auto-Round ===")
     print(f"Config: W{w_bit}A16, group_size={group_size}, iters={iters}")
 
+    print("\n✅ MULTIMODAL CALIBRATION CONFIGURED:")
+    print("  - Using liuhaotian/llava_conv_58k dataset (58k image+text pairs)")
+    print("  - AutoRound will use processor for multimodal inputs")
+    print("  - This ensures vision encoder + language model calibration")
+    print("  - Default text-only calibration (pile-10k) explicitly AVOIDED")
+
     autoround = AutoRound(
         model=model,
         tokenizer=tokenizer,  # Required for multimodal models
         processor=processor,   # Pass processor for MLLM mode
+        dataset="liuhaotian/llava_conv_58k",  # ✅ CRITICAL: Use MULTIMODAL dataset!
         bits=w_bit,
         group_size=group_size,
         scheme="W4A16",
@@ -164,10 +169,14 @@ def quantize_colqwen3(
 
     print("\n" + "=" * 80)
     print("Starting quantization...")
+    print("Using MULTIMODAL calibration: liuhaotian/llava_conv_58k")
+    print("(Image + text pairs will calibrate vision encoder + language model)")
     print("=" * 80)
 
     autoround.quantize()
     print("\n✓ Quantization completed!")
+    print("\n⚠️  CRITICAL: Test the quantized model with IMAGE+QUERY pairs")
+    print("   to verify multimodal quality!")
 
     # Save quantized model
     output_dir = Path(output_dir)
@@ -189,10 +198,12 @@ def quantize_colqwen3(
         "group_size": group_size,
         "iters": iters,
         "nsamples": nsamples,
-        "calibration_source": "vidore/colpali_train_set",
+        "calibration_dataset": "liuhaotian/llava_conv_58k",
+        "calibration_type": "multimodal (image + text pairs)",
         "quantized_layers": quant_layers,
         "fp16_layers": fp16_layers,
         "original_model": model_path,
+        "note": "Vision encoder kept in FP16 for quality preservation"
     }
 
     with open(output_dir / "quantization_metadata.json", 'w') as f:
