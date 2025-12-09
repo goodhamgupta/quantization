@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Quantize ColQwen3 model using Auto-Round with real Vidore calibration data."""
+"""Quantize ColQwen3 model using Auto-Round."""
 
 from auto_round import AutoRound
 from transformers import AutoModel, AutoProcessor
@@ -7,66 +7,6 @@ from datasets import load_dataset
 import torch
 from pathlib import Path
 import json
-
-
-def load_vidore_calibration_multimodal(processor, num_samples: int = 8, specific_indices=None):
-    """
-    Load MULTIMODAL calibration data from Vidore ColPali training set.
-
-    This is an EMBEDDING VLM model - it processes both images and text queries
-    to produce embeddings for document retrieval.
-
-    Args:
-        processor: Model processor for multimodal inputs
-        num_samples: Number of samples to use (default: 8)
-        specific_indices: Optional list of specific row indices to use (e.g., [51])
-
-    Returns:
-        List of multimodal calibration samples (image + query pairs)
-    """
-    print(f"\nLoading Vidore MULTIMODAL calibration data (image + query pairs)...")
-
-    # Process samples
-    calibration_samples = []
-
-    if specific_indices:
-        # If specific indices are requested, load only those
-        print(f"  Loading specific indices: {specific_indices}")
-        ds = load_dataset("vidore/colpali_train_set", split="train", streaming=False)
-        selected = ds.select(specific_indices)
-
-        for idx, sample in enumerate(selected):
-            query = sample["query"]
-            image = sample["image"]  # PIL Image
-
-            # Store raw data - processor will be called during quantization
-            calibration_samples.append({
-                'query': query,
-                'image': image,
-                'source': f"vidore_{specific_indices[idx]}"
-            })
-
-            print(f"    [{specific_indices[idx]}] {query[:60]}...")
-    else:
-        print(f"  Streaming first {num_samples} samples (efficient loading)")
-        ds = load_dataset("vidore/colpali_train_set", split="train", streaming=True)
-
-        for idx, sample in enumerate(ds.take(num_samples)):
-            query = sample["query"]
-            image = sample["image"]  # PIL Image
-
-            # Store raw data - processor will be called during quantization
-            calibration_samples.append({
-                'query': query,
-                'image': image,
-                'source': f"vidore_{idx}"
-            })
-
-            print(f"    [{idx}] Q: {query[:50]}... | Image: {image.size}")
-
-    print(f"✓ Loaded {len(calibration_samples)} MULTIMODAL calibration samples from Vidore")
-    print(f"  (Each sample contains: query text + document image)")
-    return calibration_samples
 
 
 def quantize_colqwen3(
@@ -85,29 +25,16 @@ def quantize_colqwen3(
     print("ColQwen3 Auto-Round Quantization with Vidore Calibration")
     print("=" * 80)
 
-    # Load model
-    print(f"\nLoading model: {model_path}")
     model = AutoModel.from_pretrained(
-        model_path,
-        trust_remote_code=True,
-        dtype=torch.bfloat16,
-        device_map="auto"
+        model_path, trust_remote_code=True, dtype=torch.bfloat16, device_map="auto"
     )
-    print(f"✓ Model loaded")
 
-    # Quick inline inspection
     lang_modules = [n for n, _ in model.named_modules() if "language_model" in n]
     print(f"  Language model modules: {len(lang_modules)}")
 
-    # Load processor and tokenizer
-    print(f"\nLoading processor and tokenizer...")
-    processor = AutoProcessor.from_pretrained(
-        model_path,
-        trust_remote_code=True
-    )
-    # Extract tokenizer from processor (required for multimodal models in AutoRound)
-    tokenizer = processor.tokenizer if hasattr(processor, 'tokenizer') else processor
-    print(f"✓ Processor and tokenizer loaded")
+    processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+    tokenizer = processor.tokenizer if hasattr(processor, "tokenizer") else processor
+    print("✓ Processor and tokenizer loaded")
 
     # Note: Calibration is handled automatically by AutoRound
     # It will use the default text-only calibration dataset (NeelNanda/pile-10k)
@@ -119,17 +46,17 @@ def quantize_colqwen3(
 
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Linear):
-            if 'language_model' in name:
+            if "language_model" in name:
                 # Quantize language model layers
                 layer_config[name] = {"bits": w_bit, "group_size": group_size}
-            elif 'visual' in name or 'embedding_proj' in name:
+            elif "visual" in name or "embedding_proj" in name:
                 # Keep vision and projection in FP16
                 layer_config[name] = {"bits": 16}
 
-    quant_layers = sum(1 for v in layer_config.values() if v.get('bits') == w_bit)
-    fp16_layers = sum(1 for v in layer_config.values() if v.get('bits') == 16)
+    quant_layers = sum(1 for v in layer_config.values() if v.get("bits") == w_bit)
+    fp16_layers = sum(1 for v in layer_config.values() if v.get("bits") == 16)
 
-    print(f"✓ Layer config built:")
+    print("✓ Layer config built:")
     print(f"  - Quantize to {w_bit}-bit: {quant_layers} layers")
     print(f"  - Keep FP16: {fp16_layers} layers")
 
@@ -145,8 +72,8 @@ def quantize_colqwen3(
 
     autoround = AutoRound(
         model=model,
-        tokenizer=tokenizer,  # Required for multimodal models
-        processor=processor,   # Pass processor for MLLM mode
+        tokenizer=tokenizer,
+        processor=processor,
         # Use default text-only calibration (NeelNanda/pile-10k)
         # This is appropriate since we're only quantizing the language model
         bits=w_bit,
@@ -156,8 +83,8 @@ def quantize_colqwen3(
         iters=iters,
         seqlen=256,
         batch_size=1,
-        layer_config=layer_config,  # Pass layer config
-        device_map="auto"
+        layer_config=layer_config,
+        device_map="auto",
     )
 
     print("\n" + "=" * 80)
@@ -168,23 +95,16 @@ def quantize_colqwen3(
 
     autoround.quantize()
     print("\n✓ Quantization completed!")
-    print("\n⚠️  CRITICAL: Test the quantized model with IMAGE+QUERY pairs")
-    print("   to verify multimodal quality!")
-
-    # Save quantized model
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n=== Saving Quantized Model ===")
+    print("\n=== Saving Quantized Model ===")
     print(f"Output: {output_dir}")
 
     autoround.save_quantized(
-        output_dir=str(output_dir),
-        format='auto_round',
-        inplace=True
+        output_dir=str(output_dir), format="auto_round", inplace=True
     )
 
-    # Save metadata
     metadata = {
         "quantization_method": "auto-round",
         "bits": w_bit,
@@ -196,18 +116,13 @@ def quantize_colqwen3(
         "quantized_layers": quant_layers,
         "fp16_layers": fp16_layers,
         "original_model": model_path,
-        "note": "Vision encoder kept in FP16 (not quantized). Text-only calibration is appropriate since only language_model is quantized."
+        "note": "Vision encoder kept in FP16 (not quantized). Text-only calibration is appropriate since only language_model is quantized.",
     }
 
-    with open(output_dir / "quantization_metadata.json", 'w') as f:
+    with open(output_dir / "quantization_metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)
 
-    print("\n" + "=" * 80)
-    print("✓ Quantization Complete!")
-    print("=" * 80)
     print(f"Output: {output_dir}")
-    print("\nNext step:")
-    print("  bash scripts/post_quantization.sh")
 
     return output_dir
 
@@ -216,13 +131,28 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Quantize ColQwen3 with Auto-Round")
-    parser.add_argument("--model", default="tomoro-colqwen3-embed-4b", help="Model path")
-    parser.add_argument("--output", default="tomoro-colqwen3-embed-4b-autoround", help="Output directory")
-    parser.add_argument("--bits", type=int, default=4, choices=[2, 3, 4], help="Bit width")
-    parser.add_argument("--group-size", type=int, default=128, choices=[32, 64, 128], help="Group size")
+    parser.add_argument(
+        "--model", default="tomoro-colqwen3-embed-4b", help="Model path"
+    )
+    parser.add_argument(
+        "--output",
+        default="tomoro-colqwen3-embed-4b-autoround",
+        help="Output directory",
+    )
+    parser.add_argument(
+        "--bits", type=int, default=4, choices=[2, 3, 4], help="Bit width"
+    )
+    parser.add_argument(
+        "--group-size", type=int, default=128, choices=[32, 64, 128], help="Group size"
+    )
     parser.add_argument("--iters", type=int, default=200, help="Tuning iterations")
     parser.add_argument("--nsamples", type=int, default=8, help="Calibration samples")
-    parser.add_argument("--vidore-indices", type=int, nargs='+', help="Specific Vidore row indices to use")
+    parser.add_argument(
+        "--vidore-indices",
+        type=int,
+        nargs="+",
+        help="Specific Vidore row indices to use",
+    )
 
     args = parser.parse_args()
 
@@ -233,5 +163,5 @@ if __name__ == "__main__":
         group_size=args.group_size,
         iters=args.iters,
         nsamples=args.nsamples,
-        vidore_indices=args.vidore_indices
+        vidore_indices=args.vidore_indices,
     )
