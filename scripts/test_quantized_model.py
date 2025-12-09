@@ -10,25 +10,12 @@ from pathlib import Path
 from typing import Dict, Any
 
 
-def build_message(item: Dict[str, Any]):
-    """Convert sample to chat message format for processor."""
-    content = []
-    if item.get("image") is not None:
-        content.append({"type": "image", "image": item["image"]})
-    if item.get("text"):
-        content.append({"type": "text", "text": item["text"]})
-    if not content:
-        content.append({"type": "text", "text": ""})
-    return [{"role": "user", "content": content}]
-
-
 @torch.no_grad()
 def embed_single_item(
     model,
     processor: AutoProcessor,
     item: Dict[str, Any],
     device: torch.device,
-    max_length: int = 16384,
 ) -> torch.Tensor:
     """Compute embedding for a single item (image + text).
 
@@ -37,23 +24,15 @@ def embed_single_item(
     - Normalizes the output
     - Masks by attention mask
     """
-    messages = build_message(item)
-    has_media = item.get("image") is not None
+    image = item.get("image")
+    text = item.get("text", "")
 
-    apply_kwargs = dict(
-        tokenize=True,
-        add_generation_prompt=False,
-        return_dict=True,
+    inputs = processor(
+        images=[image] if image is not None else None,
+        text=[text] if text else None,
         return_tensors="pt",
         padding=True,
     )
-    if has_media:
-        apply_kwargs["truncation"] = False
-    else:
-        apply_kwargs["truncation"] = True
-        apply_kwargs["max_length"] = max_length
-
-    inputs = processor.apply_chat_template(messages, **apply_kwargs)
     inputs = {
         k: (v.to(device) if isinstance(v, torch.Tensor) else v)
         for k, v in inputs.items()
@@ -104,7 +83,7 @@ def test_quantized_model_multimodal(
     original_model = AutoModel.from_pretrained(
         original_path,
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map=str(device),
     ).eval()
     print("✓ Original model loaded")
