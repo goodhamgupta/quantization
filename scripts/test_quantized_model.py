@@ -13,6 +13,7 @@ def test_quantized_model_multimodal(
     original_path: str = "tomoro-colqwen3-embed-4b",
     quantized_path: str = "tomoro-colqwen3-embed-4b-autoround",
     num_test_samples: int = 5,
+    device: str = "cuda:0",
 ):
     """
     Test quantized EMBEDDING VLM model with MULTIMODAL inputs.
@@ -24,7 +25,9 @@ def test_quantized_model_multimodal(
         original_path: Path to original model
         quantized_path: Path to quantized model
         num_test_samples: Number of image+query pairs to test (default: 5)
+        device: Device to run models on (default: "cuda:0")
     """
+    device = torch.device(device)
     print("=" * 80)
     print("ColQwen3 EMBEDDING VLM - Multimodal Quantization Test")
     print("=" * 80)
@@ -53,14 +56,17 @@ def test_quantized_model_multimodal(
     print("\n" + "=" * 80)
     print("Testing Original Model")
     print("=" * 80)
-    print("Loading original model...")
+    print(f"Loading original model to {device}...")
     original_model = AutoModel.from_pretrained(
         original_path,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
-        device_map="auto"
+        device_map=str(device)
     ).eval()
     print("✓ Original model loaded")
+    print(f"  Model device: {next(original_model.parameters()).device}")
+    if device.type == "cuda":
+        print(f"  GPU memory allocated: {torch.cuda.memory_allocated(device)/1e9:.2f} GB")
 
     original_embeddings = []
     original_times = []
@@ -75,11 +81,13 @@ def test_quantized_model_multimodal(
             images=image,  # ✅ CRITICAL: Include the document image!
             return_tensors="pt"
         )
-        inputs = {k: v.to(original_model.device) for k, v in inputs.items()}
+        inputs = {k: v.to(device) for k, v in inputs.items()}
 
         with torch.no_grad():
             start = time.time()
             outputs = original_model(**inputs)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)  # Ensure GPU ops complete before timing
             elapsed = time.time() - start
 
             # Get multimodal embedding
@@ -91,20 +99,24 @@ def test_quantized_model_multimodal(
 
     # Unload original model
     del original_model
-    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
     print("\n✓ Original model tested and unloaded")
 
     # Test quantized model
     print("\n" + "=" * 80)
     print("Testing Quantized Model")
     print("=" * 80)
-    print("Loading quantized model...")
+    print(f"Loading quantized model to {device}...")
     quantized_model = AutoModel.from_pretrained(
         quantized_path,
         trust_remote_code=True,
-        device_map="auto"
+        device_map=str(device)
     ).eval()
     print("✓ Quantized model loaded")
+    print(f"  Model device: {next(quantized_model.parameters()).device}")
+    if device.type == "cuda":
+        print(f"  GPU memory allocated: {torch.cuda.memory_allocated(device)/1e9:.2f} GB")
 
     quantized_embeddings = []
     quantized_times = []
@@ -119,11 +131,13 @@ def test_quantized_model_multimodal(
             images=image,  # ✅ CRITICAL: Include the document image!
             return_tensors="pt"
         )
-        inputs = {k: v.to(quantized_model.device) for k, v in inputs.items()}
+        inputs = {k: v.to(device) for k, v in inputs.items()}
 
         with torch.no_grad():
             start = time.time()
             outputs = quantized_model(**inputs)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)  # Ensure GPU ops complete before timing
             elapsed = time.time() - start
 
             # Get multimodal embedding
@@ -247,11 +261,6 @@ def test_quantized_model_multimodal(
     print("\n" + "=" * 80)
     print("Testing Complete!")
     print("=" * 80)
-    print("\nNEXT STEPS:")
-    print("  1. Review the quality metrics above")
-    print("  2. If quality is good (>0.90), proceed with deployment")
-    print("  3. For production: Run full Vidore retrieval evaluation")
-    print("  4. Test on your specific use case with real documents")
 
 
 if __name__ == "__main__":
@@ -276,11 +285,17 @@ if __name__ == "__main__":
         default=5,
         help="Number of image+query pairs to test (default: 5)"
     )
+    parser.add_argument(
+        "--device",
+        default="cuda:0",
+        help="Device to run models on (default: cuda:0)"
+    )
 
     args = parser.parse_args()
 
     test_quantized_model_multimodal(
         original_path=args.original,
         quantized_path=args.quantized,
-        num_test_samples=args.num_samples
+        num_test_samples=args.num_samples,
+        device=args.device
     )
