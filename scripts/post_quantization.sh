@@ -38,50 +38,6 @@ cat > "${OUTPUT_DIR}/README.md" << 'EOF'
 
 4-bit quantized version of [TomoroAI/tomoro-colqwen3-embed-4b](https://huggingface.co/TomoroAI/tomoro-colqwen3-embed-4b) using Intel Auto-Round with real Vidore calibration data.
 
-## Usage
-
-```python
-from transformers import AutoModel, AutoProcessor
-
-model = AutoModel.from_pretrained(
-    "YOUR_USERNAME/tomoro-colqwen3-embed-4b-autoround",
-    trust_remote_code=True,
-    device_map="auto"
-)
-
-processor = AutoProcessor.from_pretrained(
-    "YOUR_USERNAME/tomoro-colqwen3-embed-4b-autoround",
-    trust_remote_code=True
-)
-
-# Query embedding
-inputs = processor(text="What is shown in this document?", return_tensors="pt").to(model.device)
-outputs = model(**inputs)
-embeddings = outputs.embeddings
-```
-
-## Stats
-
-- **Original:** ~8.3 GB
-- **Quantized:** ~3 GB
-- **Compression:** ~3x
-- **Calibration:** Real Vidore training samples
-- **Quality:** >90% cosine similarity (target >95%)
-
-## Quantization Details
-
-- Method: Intel Auto-Round
-- Bits: 4-bit (W4A16)
-- Group size: 128
-- Calibration: vidore/colpali_train_set
-- Scope: Language model only (vision encoder kept in FP16)
-
-## License
-
-Apache 2.0
-
----
-
 Quantized using Auto-Round: https://github.com/intel/auto-round
 EOF
 

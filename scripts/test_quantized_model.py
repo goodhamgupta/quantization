@@ -7,7 +7,7 @@ from datasets import load_dataset
 import time
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 
 @torch.no_grad()
@@ -38,18 +38,65 @@ def embed_single_item(
         for k, v in inputs.items()
     }
 
-    # Forward through model - ColQwen3 computes embeddings internally
     outputs = model(**inputs)
 
     # outputs.embeddings shape: [1, seq_len, embed_dim]
-    # Return flattened embedding for this single item
     return outputs.embeddings[0].flatten()
+
+
+@torch.no_grad()
+def embed_batch(
+    model,
+    processor: AutoProcessor,
+    items: List[Dict[str, Any]],
+    device: torch.device,
+) -> List[torch.Tensor]:
+    """Compute embeddings for a batch of items (image + text pairs).
+
+    The ColQwen3 model handles embedding computation internally:
+    - Projects hidden states through embedding_proj_layer
+    - Normalizes the output
+    - Masks by attention mask
+
+    Note: Due to variable image sizes producing different token counts,
+    each item is processed individually but in a loop for cleaner code.
+    True batching requires images to produce the same number of tokens.
+    """
+    images = []
+    texts = []
+
+    for item in items:
+        image = item.get("image")
+        text = item.get("text", "")
+        images.append(image)
+        texts.append(text)
+
+    inputs = processor(
+        images=images,
+        text=texts,
+        return_tensors="pt",
+        padding=True,
+    )
+    inputs = {
+        k: (v.to(device) if isinstance(v, torch.Tensor) else v)
+        for k, v in inputs.items()
+    }
+
+    outputs = model(**inputs)
+
+    # outputs.embeddings shape: [batch_size, seq_len, embed_dim]
+    embeddings = []
+    for i in range(len(items)):
+        embeddings.append(outputs.embeddings[i].flatten())
+
+    return embeddings
 
 
 def test_quantized_model_multimodal(
     original_path: str = "tomoro-colqwen3-embed-4b",
     quantized_path: str = "tomoro-colqwen3-embed-4b-autoround-W4A16",
     num_test_samples: int = 5,
+    batch_size: int = 1,
     device: str = "cuda:0",
 ):
     """
@@ -59,6 +106,7 @@ def test_quantized_model_multimodal(
         original_path: Path to original model
         quantized_path: Path to quantized model
         num_test_samples: Number of image+query pairs to test (default: 5)
+        batch_size: Batch size for processing (default: 1 for sequential)
         device: Device to run models on (default: "cuda:0")
     """
     device = torch.device(device)
@@ -96,21 +144,47 @@ def test_quantized_model_multimodal(
     original_embeddings = []
     original_times = []
 
-    print(f"\nProcessing {len(test_samples)} samples sequentially...")
+    if batch_size == 1:
+        print(f"\nProcessing {len(test_samples)} samples sequentially...")
+        for idx, sample in enumerate(test_samples):
+            item = {"image": sample["image"], "text": sample["query"]}
 
-    for idx, sample in enumerate(test_samples):
-        item = {"image": sample["image"], "text": sample["query"]}
+            start = time.time()
+            embedding = embed_single_item(original_model, processor, item, device)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            elapsed = time.time() - start
 
-        start = time.time()
-        embedding = embed_single_item(original_model, processor, item, device)
-        if device.type == "cuda":
-            torch.cuda.synchronize(device)
-        elapsed = time.time() - start
+            original_embeddings.append(embedding.float().cpu())
+            original_times.append(elapsed)
 
-        original_embeddings.append(embedding.float().cpu())
-        original_times.append(elapsed)
+            print(f"  [Sample {idx}] Time: {elapsed * 1000:.1f}ms")
+    else:
+        print(
+            f"\nProcessing {len(test_samples)} samples with batch_size={batch_size}..."
+        )
+        for batch_start in range(0, len(test_samples), batch_size):
+            batch_end = min(batch_start + batch_size, len(test_samples))
+            batch_samples = test_samples[batch_start:batch_end]
+            items = [
+                {"image": sample["image"], "text": sample["query"]}
+                for sample in batch_samples
+            ]
 
-        print(f"  [Sample {idx}] Time: {elapsed * 1000:.1f}ms")
+            start = time.time()
+            batch_embeddings = embed_batch(original_model, processor, items, device)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            elapsed = time.time() - start
+
+            for emb in batch_embeddings:
+                original_embeddings.append(emb.float().cpu())
+            original_times.append(elapsed)
+
+            print(
+                f"  [Batch {batch_start}-{batch_end - 1}] "
+                f"Time: {elapsed * 1000:.1f}ms ({elapsed * 1000 / len(items):.1f}ms/sample)"
+            )
 
     del original_model
 
@@ -135,21 +209,47 @@ def test_quantized_model_multimodal(
     quantized_embeddings = []
     quantized_times = []
 
-    print(f"\nProcessing {len(test_samples)} samples sequentially...")
+    if batch_size == 1:
+        print(f"\nProcessing {len(test_samples)} samples sequentially...")
+        for idx, sample in enumerate(test_samples):
+            item = {"image": sample["image"], "text": sample["query"]}
 
-    for idx, sample in enumerate(test_samples):
-        item = {"image": sample["image"], "text": sample["query"]}
+            start = time.time()
+            embedding = embed_single_item(quantized_model, processor, item, device)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            elapsed = time.time() - start
 
-        start = time.time()
-        embedding = embed_single_item(quantized_model, processor, item, device)
-        if device.type == "cuda":
-            torch.cuda.synchronize(device)
-        elapsed = time.time() - start
+            quantized_embeddings.append(embedding.float().cpu())
+            quantized_times.append(elapsed)
 
-        quantized_embeddings.append(embedding.float().cpu())
-        quantized_times.append(elapsed)
+            print(f"  [Sample {idx}] Time: {elapsed * 1000:.1f}ms")
+    else:
+        print(
+            f"\nProcessing {len(test_samples)} samples with batch_size={batch_size}..."
+        )
+        for batch_start in range(0, len(test_samples), batch_size):
+            batch_end = min(batch_start + batch_size, len(test_samples))
+            batch_samples = test_samples[batch_start:batch_end]
+            items = [
+                {"image": sample["image"], "text": sample["query"]}
+                for sample in batch_samples
+            ]
 
-        print(f"  [Sample {idx}] Time: {elapsed * 1000:.1f}ms")
+            start = time.time()
+            batch_embeddings = embed_batch(quantized_model, processor, items, device)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            elapsed = time.time() - start
+
+            for emb in batch_embeddings:
+                quantized_embeddings.append(emb.float().cpu())
+            quantized_times.append(elapsed)
+
+            print(
+                f"  [Batch {batch_start}-{batch_end - 1}] "
+                f"Time: {elapsed * 1000:.1f}ms ({elapsed * 1000 / len(items):.1f}ms/sample)"
+            )
 
     print("\n✓ Quantized model tested")
 
@@ -241,6 +341,7 @@ def test_quantized_model_multimodal(
     results = {
         "test_type": "multimodal_embedding",
         "num_samples": len(test_samples),
+        "batch_size": batch_size,
         "avg_cosine_similarity": avg_cosine,
         "min_cosine_similarity": min_cosine,
         "max_cosine_similarity": max_cosine,
@@ -295,6 +396,12 @@ if __name__ == "__main__":
         help="Number of image+query pairs to test (default: 5)",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Batch size for processing (default: 1 for sequential)",
+    )
+    parser.add_argument(
         "--device", default="cuda:0", help="Device to run models on (default: cuda:0)"
     )
 
@@ -304,5 +411,6 @@ if __name__ == "__main__":
         original_path=args.original,
         quantized_path=args.quantized,
         num_test_samples=args.num_samples,
+        batch_size=args.batch_size,
         device=args.device,
     )
