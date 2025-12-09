@@ -2,11 +2,18 @@
 set -e
 
 MODEL_PATH="${1:-tomoro-colqwen3-embed-4b}"
-OUTPUT_DIR="${2:-tomoro-colqwen3-embed-4b-autoround}"
+SCHEME="${2:-w4a16}"
+
+MODEL_NAME=$(basename "$MODEL_PATH")
+SCHEME_LOWER=$(echo "$SCHEME" | tr '[:upper:]' '[:lower:]')
+OUTPUT_DIR="${MODEL_NAME}-${SCHEME_LOWER}"
 
 echo "=========================================="
 echo "Post-Quantization Setup"
 echo "=========================================="
+echo "Model: ${MODEL_PATH}"
+echo "Scheme: ${SCHEME}"
+echo "Output: ${OUTPUT_DIR}"
 
 # Copy processor files
 echo ""
@@ -50,5 +57,8 @@ echo "=========================================="
 echo "Output: ${OUTPUT_DIR}"
 echo ""
 echo "Next steps:"
-echo "  1. Test: uv run python scripts/test_quantized_model.py"
+echo "  1. Test: uv run python scripts/test_quantized_model.py --quantized ${OUTPUT_DIR}"
 echo "  2. Upload (optional): huggingface-cli upload YOUR_USERNAME/model-name ${OUTPUT_DIR}"
+echo ""
+echo "Usage: $0 <model_path> <scheme>"
+echo "  Example: $0 tomoro-colqwen3-embed-4b W4A16"
