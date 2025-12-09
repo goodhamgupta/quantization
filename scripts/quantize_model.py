@@ -2,43 +2,72 @@
 """Quantize ColQwen3 model using Auto-Round."""
 
 from auto_round import AutoRound
+from auto_round.schemes import PRESET_SCHEMES
 from transformers import AutoModel, AutoProcessor
-from datasets import load_dataset
 import torch
 from pathlib import Path
 import json
 
 
+def get_available_schemes():
+    """Get list of available quantization schemes."""
+    return list(PRESET_SCHEMES.keys())
+
+
 def quantize_colqwen3(
     model_path: str = "tomoro-colqwen3-embed-4b",
-    output_dir: str = "tomoro-colqwen3-embed-4b-autoround",
-    w_bit: int = 4,
-    group_size: int = 128,
+    output_dir: str = None,  # Auto-generated based on scheme if None
+    scheme: str = "W4A16",
     iters: int = 200,
     nsamples: int = 8,
-    vidore_indices=None,  # Optional: specific Vidore rows to use
 ):
     """
-    Quantize ColQwen3 with Auto-Round using real Vidore calibration data.
-    """
-    print("=" * 80)
-    print("ColQwen3 Auto-Round Quantization with Vidore Calibration")
-    print("=" * 80)
+    Quantize ColQwen3 with Auto-Round.
 
+    Args:
+        model_path: Path to source model
+        output_dir: Output directory (auto-generated if None)
+        scheme: Quantization scheme from PRESET_SCHEMES (e.g., W4A16, W2A16G32)
+        iters: Number of tuning iterations
+        nsamples: Number of calibration samples
+    """
+    # Validate scheme
+    if scheme not in PRESET_SCHEMES:
+        available = get_available_schemes()
+        raise ValueError(f"Unknown scheme '{scheme}'. Available: {available}")
+
+    scheme_config = PRESET_SCHEMES[scheme]
+    w_bit = scheme_config.bits
+    group_size = scheme_config.group_size
+
+    # Auto-generate output directory with scheme name
+    if output_dir is None:
+        model_name = Path(model_path).name
+        output_dir = f"{model_name}-{scheme.lower()}"
+
+    print("=" * 80)
+    print("ColQwen3 Auto-Round Quantization")
+    print("=" * 80)
+    print(f"\nScheme: {scheme}")
+    print(f"  - Weight bits: {w_bit}")
+    print(f"  - Group size: {group_size}")
+    print(f"  - Symmetric: {scheme_config.sym}")
+    print(f"  - Data type: {scheme_config.data_type}")
+    print(f"  - Activation bits: {scheme_config.act_bits}")
+
+    print(f"\nLoading model: {model_path}")
     model = AutoModel.from_pretrained(
         model_path, trust_remote_code=True, dtype=torch.bfloat16, device_map="auto"
     )
 
     lang_modules = [n for n, _ in model.named_modules() if "language_model" in n]
+    print(f"✓ Model loaded")
     print(f"  Language model modules: {len(lang_modules)}")
 
+    print("\nLoading processor and tokenizer...")
     processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
     tokenizer = processor.tokenizer if hasattr(processor, "tokenizer") else processor
     print("✓ Processor and tokenizer loaded")
-
-    # Note: Calibration is handled automatically by AutoRound
-    # It will use the default text-only calibration dataset (NeelNanda/pile-10k)
-    # This is appropriate since we're only quantizing the language_model component
 
     # Build layer config - ONLY quantize language_model layers
     print("\n=== Building Layer Config ===")
@@ -61,7 +90,7 @@ def quantize_colqwen3(
     print(f"  - Keep FP16: {fp16_layers} layers")
 
     print("\n=== Initializing Auto-Round ===")
-    print(f"Config: W{w_bit}A16, group_size={group_size}, iters={iters}")
+    print(f"Config: {scheme}, iters={iters}, nsamples={nsamples}")
 
     print("\n✅ CALIBRATION CONFIGURED:")
     print("  - Using AutoRound's default text-only calibration (NeelNanda/pile-10k)")
@@ -74,11 +103,8 @@ def quantize_colqwen3(
         model=model,
         tokenizer=tokenizer,
         processor=processor,
-        # Use default text-only calibration (NeelNanda/pile-10k)
-        # This is appropriate since we're only quantizing the language model
-        bits=w_bit,
-        group_size=group_size,
-        scheme="W4A16",
+        # Use scheme from PRESET_SCHEMES
+        scheme=scheme,
         nsamples=nsamples,
         iters=iters,
         seqlen=256,
@@ -89,12 +115,13 @@ def quantize_colqwen3(
 
     print("\n" + "=" * 80)
     print("Starting quantization...")
+    print(f"Scheme: {scheme} (W{w_bit}A{scheme_config.act_bits})")
     print("Using text-only calibration (default: NeelNanda/pile-10k)")
-    print("(Language model will be calibrated and quantized to 4-bit)")
     print("=" * 80)
 
     autoround.quantize()
     print("\n✓ Quantization completed!")
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -107,8 +134,12 @@ def quantize_colqwen3(
 
     metadata = {
         "quantization_method": "auto-round",
+        "scheme": scheme,
         "bits": w_bit,
         "group_size": group_size,
+        "sym": scheme_config.sym,
+        "data_type": scheme_config.data_type,
+        "act_bits": scheme_config.act_bits,
         "iters": iters,
         "nsamples": nsamples,
         "calibration_dataset": "NeelNanda/pile-10k (AutoRound default)",
@@ -122,7 +153,8 @@ def quantize_colqwen3(
     with open(output_dir / "quantization_metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)
 
-    print(f"Output: {output_dir}")
+    print(f"\n✓ Quantized model saved to: {output_dir}")
+    print(f"  Metadata: {output_dir}/quantization_metadata.json")
 
     return output_dir
 
@@ -130,38 +162,68 @@ def quantize_colqwen3(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Quantize ColQwen3 with Auto-Round")
+    # Get available schemes for help text
+    available_schemes = get_available_schemes()
+
+    parser = argparse.ArgumentParser(
+        description="Quantize ColQwen3 with Auto-Round",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""
+Available quantization schemes:
+  W4A16     - 4-bit weights, 16-bit activations (recommended)
+  W8A16     - 8-bit weights, 16-bit activations (highest quality)
+  W3A16     - 3-bit weights, 16-bit activations
+  W2A16     - 2-bit weights, 16-bit activations (extreme compression)
+  W2A16G64  - 2-bit weights, group size 64
+  W2A16G32  - 2-bit weights, group size 32 (best 2-bit quality)
+  FPW8A16   - FP8 weights, 16-bit activations
+  MXFP4     - MX FP4 weights and activations (requires specific hardware)
+  MXFP8     - MX FP8 weights and activations (requires specific hardware)
+  NVFP4     - NVIDIA FP4 (requires Blackwell/Hopper GPU)
+  FP8_STATIC - Static FP8 quantization
+  BF16      - BFloat16 (no quantization, baseline)
+
+Examples:
+  python {parser.prog} --scheme W4A16
+  python {parser.prog} --scheme W2A16G32 --model ./my-model
+  python {parser.prog} --scheme W8A16 --output ./output-dir
+""",
+    )
     parser.add_argument(
         "--model", default="tomoro-colqwen3-embed-4b", help="Model path"
     )
     parser.add_argument(
         "--output",
-        default="tomoro-colqwen3-embed-4b-autoround",
-        help="Output directory",
+        default=None,
+        help="Output directory (default: <model>-<scheme>)",
     )
     parser.add_argument(
-        "--bits", type=int, default=4, choices=[2, 3, 4], help="Bit width"
-    )
-    parser.add_argument(
-        "--group-size", type=int, default=128, choices=[32, 64, 128], help="Group size"
+        "--scheme",
+        default="W4A16",
+        choices=available_schemes,
+        help="Quantization scheme (default: W4A16)",
     )
     parser.add_argument("--iters", type=int, default=200, help="Tuning iterations")
     parser.add_argument("--nsamples", type=int, default=8, help="Calibration samples")
     parser.add_argument(
-        "--vidore-indices",
-        type=int,
-        nargs="+",
-        help="Specific Vidore row indices to use",
+        "--list-schemes",
+        action="store_true",
+        help="List all available quantization schemes and exit",
     )
 
     args = parser.parse_args()
 
+    if args.list_schemes:
+        print("Available quantization schemes:")
+        for name in available_schemes:
+            scheme = PRESET_SCHEMES[name]
+            print(f"  {name:12} - {scheme.bits}-bit weights, {scheme.act_bits}-bit activations, group_size={scheme.group_size}")
+        exit(0)
+
     quantize_colqwen3(
         model_path=args.model,
         output_dir=args.output,
-        w_bit=args.bits,
-        group_size=args.group_size,
+        scheme=args.scheme,
         iters=args.iters,
         nsamples=args.nsamples,
-        vidore_indices=args.vidore_indices,
     )
