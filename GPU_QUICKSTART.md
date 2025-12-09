@@ -53,18 +53,12 @@ uv run python scripts/quantize_model.py \
 uv run python scripts/quantize_model.py --iters 0 --group-size 32
 ```
 
-**Using specific Vidore rows** (e.g., row 51):
-```bash
-uv run python scripts/quantize_model.py --vidore-indices 51 42 100 200 300 400 500 600
-```
-
 ### What to expect:
 
 1. Model loading (~1-2 min)
-2. Vidore calibration data download and processing (~1 min)
-3. Layer config building (few seconds)
-4. Quantization process (10-15 min, or ~1 min for RTN mode)
-5. Model saving (~1 min)
+2. Layer config building (few seconds)
+3. Quantization process (10-15 min, or ~1 min for RTN mode)
+4. Model saving (~1 min)
 
 Output will be saved to `tomoro-colqwen3-embed-4b-autoround/`
 
@@ -149,31 +143,6 @@ uv run python scripts/quantize_model.py --nsamples 4
 - The test script loads models sequentially (not simultaneously) to minimize memory usage
 - If still OOM, you may need to test on a machine with more VRAM
 
-### Issue: Quantization fails with error
-
-The script has a built-in fallback that will automatically try RTN mode if the standard approach fails. Check the output for:
-```
-⚠️  Standard approach failed: [error]
-Trying fallback: RTN mode for VLMs...
-```
-
-### Issue: Import errors
-
-Make sure you're using `uv run python` to execute the scripts, not just `python`:
-```bash
-# Correct
-uv run python scripts/quantize_model.py
-
-# May not work if packages aren't in system Python
-python scripts/quantize_model.py
-```
-
-### Issue: Vidore dataset download is slow
-
-The first run will download the Vidore dataset. Subsequent runs will use the cached version. If it's too slow, you can:
-1. Use fewer samples: `--nsamples 4`
-2. Pre-download on a faster connection
-
 ## Complete Workflow Example
 
 Here's a complete end-to-end example:
@@ -250,24 +219,3 @@ tomoro-colqwen3-embed-4b-autoround/
 
 test_results.json               # Test results and metrics
 ```
-
-## Next Steps
-
-Once you have a quantized model that meets your quality requirements:
-
-1. ✅ Test with your own specific use cases and documents
-2. ✅ Benchmark on your target deployment environment
-3. ✅ Compare quality metrics on a larger test set
-4. ⏳ Deploy locally or upload to HuggingFace
-5. ⏳ (Optional) Export to GGUF format for llama.cpp if needed
-
-## Support
-
-If you encounter issues:
-1. Check GPU memory with `nvidia-smi`
-2. Verify CUDA is available in PyTorch
-3. Try RTN mode as a fallback
-4. Check logs for specific error messages
-5. Reduce batch size or number of calibration samples
-
-Good luck with your quantization! 🚀
