@@ -2,18 +2,12 @@
 """Test quantized ColQwen3 EMBEDDING VLM model with MULTIMODAL inputs (image + query)."""
 
 import torch
-from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
+from transformers import AutoProcessor, AutoModel
 from datasets import load_dataset
 import time
 import json
 from pathlib import Path
 from typing import Dict, Any
-
-
-def safe_norm(x: torch.Tensor) -> torch.Tensor:
-    """L2 normalize with epsilon to avoid division by zero."""
-    n = torch.norm(x, dim=-1, keepdim=True).clamp(min=1e-12)
-    return x / n
 
 
 def build_message(item: Dict[str, Any]):
@@ -28,40 +22,21 @@ def build_message(item: Dict[str, Any]):
     return [{"role": "user", "content": content}]
 
 
-def last_text_idx_excluding_vision(
-    input_ids: torch.LongTensor,
-    attention_mask: torch.LongTensor,
-    image_tid: int,
-    video_tid: int,
-    vstart_tid: int,
-    vend_tid: int,
-) -> int:
-    """Find index of last text token (excluding vision tokens)."""
-    L = input_ids.numel()
-    bad = (
-        (input_ids == image_tid)
-        | (input_ids == video_tid)
-        | (input_ids == vstart_tid)
-        | (input_ids == vend_tid)
-    )
-    good = (attention_mask == 1) & (~bad)
-    for j in range(L - 1, -1, -1):
-        if good[j].item():
-            return j
-    return -1
-
-
 @torch.no_grad()
 def embed_single_item(
-    model: Qwen2VLForConditionalGeneration,
+    model,
     processor: AutoProcessor,
     item: Dict[str, Any],
     device: torch.device,
     max_length: int = 16384,
-    alpha_text: float = 0.5,
 ) -> torch.Tensor:
-    """Compute embedding for a single item (image + text)."""
-    cfg = model.config
+    """Compute embedding for a single item (image + text).
+
+    The ColQwen3 model handles embedding computation internally:
+    - Projects hidden states through embedding_proj_layer
+    - Normalizes the output
+    - Masks by attention mask
+    """
     messages = build_message(item)
     has_media = item.get("image") is not None
 
@@ -80,58 +55,21 @@ def embed_single_item(
 
     inputs = processor.apply_chat_template(messages, **apply_kwargs)
     inputs = {
-        k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in inputs.items()
+        k: (v.to(device) if isinstance(v, torch.Tensor) else v)
+        for k, v in inputs.items()
     }
 
-    # Forward through base model to get hidden states
-    outputs = model.model(**inputs)
-    hidden = outputs.last_hidden_state[0]  # [L, D]
-    attn = inputs["attention_mask"][0]
-    ids = inputs["input_ids"][0]
-    D = hidden.shape[-1]
+    # Forward through model - ColQwen3 computes embeddings internally
+    outputs = model(**inputs)
 
-    # Special token IDs
-    image_tid = cfg.image_token_id
-    video_tid = cfg.video_token_id
-    vstart_tid = cfg.vision_start_token_id
-    vend_tid = cfg.vision_end_token_id
-
-    # Text embedding: last non-vision token
-    t_idx = last_text_idx_excluding_vision(
-        ids, attn, image_tid, video_tid, vstart_tid, vend_tid
-    )
-    has_text = t_idx >= 0
-    text_vec = (
-        hidden[t_idx] if has_text else torch.zeros(D, device=device, dtype=hidden.dtype)
-    )
-
-    # Image embedding: mean over visual placeholders
-    visual_mask = (ids == image_tid) | (ids == video_tid)
-    has_image = visual_mask.any().item()
-    img_vec = (
-        hidden[visual_mask].mean(dim=0)
-        if has_image
-        else torch.zeros(D, device=device, dtype=hidden.dtype)
-    )
-
-    # Blend + normalize
-    if has_text and has_image:
-        vec = alpha_text * safe_norm(text_vec) + (1.0 - alpha_text) * safe_norm(img_vec)
-        vec = safe_norm(vec)
-    elif has_text:
-        vec = safe_norm(text_vec)
-    elif has_image:
-        vec = safe_norm(img_vec)
-    else:
-        last_vis = int(attn.sum().item() - 1)
-        vec = safe_norm(hidden[last_vis])
-
-    return vec
+    # outputs.embeddings shape: [1, seq_len, embed_dim]
+    # Return flattened embedding for this single item
+    return outputs.embeddings[0].flatten()
 
 
 def test_quantized_model_multimodal(
     original_path: str = "tomoro-colqwen3-embed-4b",
-    quantized_path: str = "tomoro-colqwen3-embed-4b-autoround",
+    quantized_path: str = "tomoro-colqwen3-embed-4b-autoround-W4A16",
     num_test_samples: int = 5,
     device: str = "cuda:0",
 ):
@@ -163,7 +101,7 @@ def test_quantized_model_multimodal(
     print("Testing Original Model")
     print("=" * 80)
     print(f"Loading original model to {device}...")
-    original_model = Qwen2VLForConditionalGeneration.from_pretrained(
+    original_model = AutoModel.from_pretrained(
         original_path,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
@@ -205,7 +143,7 @@ def test_quantized_model_multimodal(
     print("Testing Quantized Model")
     print("=" * 80)
     print(f"Loading quantized model to {device}...")
-    quantized_model = Qwen2VLForConditionalGeneration.from_pretrained(
+    quantized_model = AutoModel.from_pretrained(
         quantized_path, trust_remote_code=True, device_map=str(device)
     ).eval()
     print("✓ Quantized model loaded")
