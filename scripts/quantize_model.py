@@ -168,26 +168,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Quantize ColQwen3 with Auto-Round",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
-Available quantization schemes:
-  W4A16     - 4-bit weights, 16-bit activations (recommended)
-  W8A16     - 8-bit weights, 16-bit activations (highest quality)
-  W3A16     - 3-bit weights, 16-bit activations
-  W2A16     - 2-bit weights, 16-bit activations (extreme compression)
-  W2A16G64  - 2-bit weights, group size 64
-  W2A16G32  - 2-bit weights, group size 32 (best 2-bit quality)
-  FPW8A16   - FP8 weights, 16-bit activations
-  MXFP4     - MX FP4 weights and activations (requires specific hardware)
-  MXFP8     - MX FP8 weights and activations (requires specific hardware)
-  NVFP4     - NVIDIA FP4 (requires Blackwell/Hopper GPU)
-  FP8_STATIC - Static FP8 quantization
-  BF16      - BFloat16 (no quantization, baseline)
-
-Examples:
-  python {parser.prog} --scheme W4A16
-  python {parser.prog} --scheme W2A16G32 --model ./my-model
-  python {parser.prog} --scheme W8A16 --output ./output-dir
-""",
+        epilog="""
+            Available quantization schemes:
+            W4A16     - 4-bit weights, 16-bit activations (recommended)
+            W8A16     - 8-bit weights, 16-bit activations (highest quality)
+            W3A16     - 3-bit weights, 16-bit activations
+            W2A16     - 2-bit weights, 16-bit activations (extreme compression)
+            W2A16G64  - 2-bit weights, group size 64
+            W2A16G32  - 2-bit weights, group size 32 (best 2-bit quality)
+            FPW8A16   - FP8 weights, 16-bit activations
+            MXFP4     - MX FP4 weights and activations (requires specific hardware)
+            MXFP8     - MX FP8 weights and activations (requires specific hardware)
+            NVFP4     - NVIDIA FP4 (requires Blackwell/Hopper GPU)
+            FP8_STATIC - Static FP8 quantization
+            BF16      - BFloat16 (no quantization, baseline)
+        """,
     )
     parser.add_argument(
         "--model", default="tomoro-colqwen3-embed-4b", help="Model path"
@@ -217,7 +212,9 @@ Examples:
         print("Available quantization schemes:")
         for name in available_schemes:
             scheme = PRESET_SCHEMES[name]
-            print(f"  {name:12} - {scheme.bits}-bit weights, {scheme.act_bits}-bit activations, group_size={scheme.group_size}")
+            print(
+                f"  {name:12} - {scheme.bits}-bit weights, {scheme.act_bits}-bit activations, group_size={scheme.group_size}"
+            )
         exit(0)
 
     quantize_colqwen3(
