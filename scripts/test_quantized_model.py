@@ -14,45 +14,34 @@ def test_quantized_model_multimodal(
     quantized_path: str = "tomoro-colqwen3-embed-4b-autoround",
     num_test_samples: int = 5,
     device: str = "cuda:0",
+    batch_size: int = 10,
 ):
     """
-    Test quantized EMBEDDING VLM model with MULTIMODAL inputs.
+    Test quantized vlm model with multimodalinputs.
 
-    This is an EMBEDDING model - it takes image + query and produces embeddings
-    for document retrieval tasks.
 
     Args:
         original_path: Path to original model
         quantized_path: Path to quantized model
         num_test_samples: Number of image+query pairs to test (default: 5)
         device: Device to run models on (default: "cuda:0")
+        batch_size: Number of samples to process in each batch (default: 10)
     """
     device = torch.device(device)
-    print("=" * 80)
-    print("ColQwen3 EMBEDDING VLM - Multimodal Quantization Test")
-    print("=" * 80)
-    print("\nIMPORTANT: This is an EMBEDDING VLM model")
-    print("  - Input: Document image + Text query")
-    print("  - Output: Multimodal embedding vector")
-    print("  - Use case: Document retrieval")
 
-    # Load processor
     print(f"\nLoading processor from {original_path}...")
-    processor = AutoProcessor.from_pretrained(
-        original_path,
-        trust_remote_code=True
-    )
+    processor = AutoProcessor.from_pretrained(original_path, trust_remote_code=True)
     print("✓ Processor loaded")
 
-    # Load test samples from Vidore (image + query pairs)
     print(f"\nLoading {num_test_samples} test samples from Vidore...")
     ds = load_dataset("vidore/colpali_train_set", split="train", streaming=True)
     test_samples = list(ds.take(num_test_samples))
     print(f"✓ Loaded {len(test_samples)} image+query pairs")
     for idx, sample in enumerate(test_samples):
-        print(f"  [{idx}] Query: {sample['query'][:60]}... | Image size: {sample['image'].size}")
+        print(
+            f"  [{idx}] Query: {sample['query'][:60]}... | Image size: {sample['image'].size}"
+        )
 
-    # Test original model
     print("\n" + "=" * 80)
     print("Testing Original Model")
     print("=" * 80)
@@ -61,75 +50,97 @@ def test_quantized_model_multimodal(
         original_path,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
-        device_map=str(device)
+        device_map=str(device),
     ).eval()
     print("✓ Original model loaded")
     print(f"  Model device: {next(original_model.parameters()).device}")
     if device.type == "cuda":
-        print(f"  GPU memory allocated: {torch.cuda.memory_allocated(device)/1e9:.2f} GB")
+        print(
+            f"  GPU memory allocated: {torch.cuda.memory_allocated(device) / 1e9:.2f} GB"
+        )
 
     original_embeddings = []
     original_times = []
 
-    for idx, sample in enumerate(test_samples):
-        query = sample["query"]
-        image = sample["image"]  # PIL Image
+    num_batches = (len(test_samples) + batch_size - 1) // batch_size
+    print(
+        f"\nProcessing {len(test_samples)} samples in {num_batches} batch(es) of up to {batch_size}..."
+    )
 
-        # Process BOTH query and image (multimodal input!)
+    for batch_idx in range(num_batches):
+        batch_start = batch_idx * batch_size
+        batch_end = min(batch_start + batch_size, len(test_samples))
+        batch_samples = test_samples[batch_start:batch_end]
+
+        queries = [s["query"] for s in batch_samples]
+        images = [s["image"] for s in batch_samples]
+
         inputs = processor(
-            text=query,
-            images=image,  # ✅ CRITICAL: Include the document image!
-            return_tensors="pt"
+            text=queries,
+            images=images,
+            return_tensors="pt",
+            padding=True,
         )
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
         with torch.no_grad():
             start = time.time()
             outputs = original_model(**inputs)
-            if device.type == "cuda":
-                torch.cuda.synchronize(device)  # Ensure GPU ops complete before timing
             elapsed = time.time() - start
 
-            # Get multimodal embedding
-            embedding = outputs.embeddings.flatten().float().cpu()
-            original_embeddings.append(embedding)
+            batch_embeddings = outputs.embeddings
+            for i in range(len(batch_samples)):
+                embedding = batch_embeddings[i].flatten().float().cpu()
+                original_embeddings.append(embedding)
             original_times.append(elapsed)
 
-        print(f"  [{idx}] Embedding shape: {embedding.shape} | Time: {elapsed*1000:.1f}ms")
+        print(
+            f"  [Batch {batch_idx}] Samples {batch_start}-{batch_end - 1} | "
+            f"Batch time: {elapsed * 1000:.1f}ms | "
+            f"Avg per sample: {elapsed * 1000 / len(batch_samples):.1f}ms"
+        )
 
-    # Unload original model
     del original_model
+
     if device.type == "cuda":
         torch.cuda.empty_cache()
     print("\n✓ Original model tested and unloaded")
 
-    # Test quantized model
     print("\n" + "=" * 80)
     print("Testing Quantized Model")
     print("=" * 80)
     print(f"Loading quantized model to {device}...")
     quantized_model = AutoModel.from_pretrained(
-        quantized_path,
-        trust_remote_code=True,
-        device_map=str(device)
+        quantized_path, trust_remote_code=True, device_map=str(device)
     ).eval()
     print("✓ Quantized model loaded")
     print(f"  Model device: {next(quantized_model.parameters()).device}")
     if device.type == "cuda":
-        print(f"  GPU memory allocated: {torch.cuda.memory_allocated(device)/1e9:.2f} GB")
+        print(
+            f"  GPU memory allocated: {torch.cuda.memory_allocated(device) / 1e9:.2f} GB"
+        )
 
     quantized_embeddings = []
     quantized_times = []
 
-    for idx, sample in enumerate(test_samples):
-        query = sample["query"]
-        image = sample["image"]  # PIL Image
+    print(
+        f"\nProcessing {len(test_samples)} samples in {num_batches} batch(es) of up to {batch_size}..."
+    )
 
-        # Process BOTH query and image (multimodal input!)
+    for batch_idx in range(num_batches):
+        batch_start = batch_idx * batch_size
+        batch_end = min(batch_start + batch_size, len(test_samples))
+        batch_samples = test_samples[batch_start:batch_end]
+
+        # Prepare batch inputs
+        queries = [s["query"] for s in batch_samples]
+        images = [s["image"] for s in batch_samples]
+
         inputs = processor(
-            text=query,
-            images=image,  # ✅ CRITICAL: Include the document image!
-            return_tensors="pt"
+            text=queries,
+            images=images,
+            return_tensors="pt",
+            padding=True,
         )
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
@@ -140,16 +151,20 @@ def test_quantized_model_multimodal(
                 torch.cuda.synchronize(device)  # Ensure GPU ops complete before timing
             elapsed = time.time() - start
 
-            # Get multimodal embedding
-            embedding = outputs.embeddings.flatten().float().cpu()
-            quantized_embeddings.append(embedding)
+            batch_embeddings = outputs.embeddings  # Shape: [batch, seq, dim]
+            for i in range(len(batch_samples)):
+                embedding = batch_embeddings[i].flatten().float().cpu()
+                quantized_embeddings.append(embedding)
             quantized_times.append(elapsed)
 
-        print(f"  [{idx}] Embedding shape: {embedding.shape} | Time: {elapsed*1000:.1f}ms")
+        print(
+            f"  [Batch {batch_idx}] Samples {batch_start}-{batch_end - 1} | "
+            f"Batch time: {elapsed * 1000:.1f}ms | "
+            f"Avg per sample: {elapsed * 1000 / len(batch_samples):.1f}ms"
+        )
 
     print("\n✓ Quantized model tested")
 
-    # Compare multimodal embeddings
     print("\n" + "=" * 80)
     print("Multimodal Embedding Quality Comparison")
     print("=" * 80)
@@ -161,16 +176,13 @@ def test_quantized_model_multimodal(
 
         # Cosine similarity between multimodal embeddings
         cos_sim = torch.nn.functional.cosine_similarity(
-            orig_emb.unsqueeze(0),
-            quant_emb.unsqueeze(0)
+            orig_emb.unsqueeze(0), quant_emb.unsqueeze(0)
         ).item()
 
         cosine_sims.append(cos_sim)
 
-        # Check for NaN/Inf
         has_nan_inf = torch.isnan(quant_emb).any() or torch.isinf(quant_emb).any()
 
-        # L2 distance
         l2_dist = torch.norm(orig_emb - quant_emb).item()
 
         print(f"\n[Sample {idx}]")
@@ -178,16 +190,21 @@ def test_quantized_model_multimodal(
         print(f"  Image: {sample['image'].size}")
         print(f"  Cosine similarity: {cos_sim:.6f}")
         print(f"  L2 distance: {l2_dist:.4f}")
-        print(f"  Speedup: {original_times[idx] / quantized_times[idx]:.2f}x")
         print(f"  NaN/Inf detected: {has_nan_inf}")
         if has_nan_inf:
-            print(f"  ⚠️  WARNING: NaN or Inf values detected!")
+            print("  ⚠️  WARNING: NaN or Inf values detected!")
 
-    # Summary statistics
     avg_cosine = sum(cosine_sims) / len(cosine_sims)
     min_cosine = min(cosine_sims)
     max_cosine = max(cosine_sims)
-    avg_speedup = sum(o/q for o, q in zip(original_times, quantized_times)) / len(original_times)
+
+    total_original_time = sum(original_times)
+    total_quantized_time = sum(quantized_times)
+    avg_speedup = (
+        total_original_time / total_quantized_time if total_quantized_time > 0 else 0
+    )
+    avg_original_per_sample = total_original_time * 1000 / len(test_samples)
+    avg_quantized_per_sample = total_quantized_time * 1000 / len(test_samples)
 
     print("\n" + "=" * 80)
     print("Summary")
@@ -195,9 +212,15 @@ def test_quantized_model_multimodal(
     print(f"Average cosine similarity: {avg_cosine:.6f}")
     print(f"Min cosine similarity: {min_cosine:.6f}")
     print(f"Max cosine similarity: {max_cosine:.6f}")
-    print(f"Average speedup: {avg_speedup:.2f}x")
+    print(f"\nTiming (batch_size={batch_size}):")
+    print(
+        f"  Original total: {total_original_time * 1000:.1f}ms ({avg_original_per_sample:.1f}ms/sample)"
+    )
+    print(
+        f"  Quantized total: {total_quantized_time * 1000:.1f}ms ({avg_quantized_per_sample:.1f}ms/sample)"
+    )
+    print(f"  Speedup: {avg_speedup:.2f}x")
 
-    # Quality assessment
     if avg_cosine >= 0.95:
         quality = "✓ EXCELLENT (≥0.95) - Multimodal embedding quality preserved!"
     elif avg_cosine >= 0.90:
@@ -209,10 +232,9 @@ def test_quantized_model_multimodal(
 
     print(f"\nQuality: {quality}")
 
-    # Model size comparison
     def get_dir_size(path):
         total = 0
-        for file in Path(path).rglob('*'):
+        for file in Path(path).rglob("*"):
             if file.is_file():
                 total += file.stat().st_size
         return total
@@ -220,7 +242,7 @@ def test_quantized_model_multimodal(
     orig_size = get_dir_size(original_path) / 1e9
     quant_size = get_dir_size(quantized_path) / 1e9
 
-    print(f"\n" + "=" * 80)
+    print("\n" + "=" * 80)
     print("Model Size Comparison")
     print("=" * 80)
     print(f"Original: {orig_size:.2f} GB")
@@ -228,14 +250,18 @@ def test_quantized_model_multimodal(
     print(f"Compression: {orig_size / quant_size:.2f}x")
     print(f"Size reduction: {100 * (1 - quant_size / orig_size):.1f}%")
 
-    # Save detailed results
     results = {
         "test_type": "multimodal_embedding",
         "num_samples": len(test_samples),
+        "batch_size": batch_size,
         "avg_cosine_similarity": avg_cosine,
         "min_cosine_similarity": min_cosine,
         "max_cosine_similarity": max_cosine,
         "avg_speedup": avg_speedup,
+        "total_original_time_ms": total_original_time * 1000,
+        "total_quantized_time_ms": total_quantized_time * 1000,
+        "avg_original_per_sample_ms": avg_original_per_sample,
+        "avg_quantized_per_sample_ms": avg_quantized_per_sample,
         "quality": quality,
         "original_size_gb": orig_size,
         "quantized_size_gb": quant_size,
@@ -245,15 +271,13 @@ def test_quantized_model_multimodal(
                 "sample_idx": idx,
                 "query": sample["query"][:100],
                 "cosine_similarity": cosine_sims[idx],
-                "original_time_ms": original_times[idx] * 1000,
-                "quantized_time_ms": quantized_times[idx] * 1000,
             }
             for idx, sample in enumerate(test_samples)
-        ]
+        ],
     }
 
     results_path = "multimodal_test_results.json"
-    with open(results_path, 'w') as f:
+    with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
 
     print(f"\n✓ Detailed results saved to {results_path}")
@@ -270,25 +294,27 @@ if __name__ == "__main__":
         description="Test quantized ColQwen3 EMBEDDING VLM with multimodal inputs"
     )
     parser.add_argument(
-        "--original",
-        default="tomoro-colqwen3-embed-4b",
-        help="Path to original model"
+        "--original", default="tomoro-colqwen3-embed-4b", help="Path to original model"
     )
     parser.add_argument(
         "--quantized",
         default="tomoro-colqwen3-embed-4b-autoround",
-        help="Path to quantized model"
+        help="Path to quantized model",
     )
     parser.add_argument(
         "--num-samples",
         type=int,
         default=5,
-        help="Number of image+query pairs to test (default: 5)"
+        help="Number of image+query pairs to test (default: 5)",
     )
     parser.add_argument(
-        "--device",
-        default="cuda:0",
-        help="Device to run models on (default: cuda:0)"
+        "--device", default="cuda:0", help="Device to run models on (default: cuda:0)"
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=10,
+        help="Batch size for embedding (default: 10)",
     )
 
     args = parser.parse_args()
@@ -297,5 +323,6 @@ if __name__ == "__main__":
         original_path=args.original,
         quantized_path=args.quantized,
         num_test_samples=args.num_samples,
-        device=args.device
+        device=args.device,
+        batch_size=args.batch_size,
     )
