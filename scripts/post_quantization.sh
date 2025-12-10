@@ -4,9 +4,8 @@ set -e
 MODEL_PATH="${1:-tomoro-colqwen3-embed-4b}"
 SCHEME="${2:-w4a16}"
 
-MODEL_NAME=$(basename "$MODEL_PATH")
 SCHEME_LOWER=$(echo "$SCHEME" | tr '[:upper:]' '[:lower:]')
-OUTPUT_DIR="${MODEL_NAME}-${SCHEME_LOWER}"
+OUTPUT_DIR="${MODEL_PATH}-${SCHEME_LOWER}"
 
 echo "=========================================="
 echo "Post-Quantization Setup"
