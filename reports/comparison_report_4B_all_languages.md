@@ -4,10 +4,10 @@
 
 | Property | Original | Quantized |
 |----------|----------|-----------|
-| **Model Name** | TomoroAI/tomoro-colqwen3-embed-4b | shubhamg2208/tomoro-ai-colqwen3-embed-4b-autoawq-w4a16 |
+| **Model Name** | TomoroAI/tomoro-colqwen3-embed-4b | TomoroAI/tomoro-colqwen3-embed-4b |
 | **Parameters** | 4.0B | 4.0B |
-| **Memory Usage** | 8466 MB | 8466 MB |
-| **Release Date** | 2025-11-26 | 2025-12-12 |
+| **Memory Usage** | 8.4 GB | 3.5 GB |
+| **Release Date** | 2025-11-26 | 2025-11-26 |
 
 ## NDCG@5 Performance Comparison
 
@@ -39,11 +39,41 @@
 | Vidore3EnergyRetrieval [Portuguese] | 0.63236 | 0.62828 | -0.00408 | -0.65% |
 | Vidore3EnergyRetrieval [Spanish] | 0.63481 | 0.63888 | +0.00407 | +0.64% |
 | Vidore3FinanceEnRetrieval [English] | 0.67494 | 0.67323 | -0.00171 | -0.25% |
+| Vidore3FinanceEnRetrieval [French] | 0.58705 | 0.57899 | -0.00806 | -1.37% |
+| Vidore3FinanceEnRetrieval [German] | 0.59188 | 0.58591 | -0.00597 | -1.01% |
+| Vidore3FinanceEnRetrieval [Italian] | 0.61216 | 0.60419 | -0.00797 | -1.30% |
+| Vidore3FinanceEnRetrieval [Portuguese] | 0.59784 | 0.60393 | +0.00609 | +1.02% |
+| Vidore3FinanceEnRetrieval [Spanish] | 0.62061 | 0.61163 | -0.00898 | -1.45% |
 | Vidore3FinanceFrRetrieval [English] | 0.42003 | 0.42656 | +0.00653 | +1.55% |
+| Vidore3FinanceFrRetrieval [French] | 0.43333 | 0.44232 | +0.00899 | +2.07% |
+| Vidore3FinanceFrRetrieval [German] | 0.42478 | 0.41560 | -0.00918 | -2.16% |
+| Vidore3FinanceFrRetrieval [Italian] | 0.41696 | 0.42866 | +0.01170 | +2.81% |
+| Vidore3FinanceFrRetrieval [Portuguese] | 0.43508 | 0.43685 | +0.00177 | +0.41% |
+| Vidore3FinanceFrRetrieval [Spanish] | 0.44323 | 0.44006 | -0.00317 | -0.72% |
 | Vidore3HrRetrieval [English] | 0.60373 | 0.60522 | +0.00149 | +0.25% |
+| Vidore3HrRetrieval [French] | 0.55483 | 0.54596 | -0.00887 | -1.60% |
+| Vidore3HrRetrieval [German] | 0.56691 | 0.57108 | +0.00417 | +0.74% |
+| Vidore3HrRetrieval [Italian] | 0.54890 | 0.54479 | -0.00411 | -0.75% |
+| Vidore3HrRetrieval [Portuguese] | 0.57567 | 0.56240 | -0.01327 | -2.31% |
+| Vidore3HrRetrieval [Spanish] | 0.57231 | 0.56132 | -0.01099 | -1.92% |
 | Vidore3IndustrialRetrieval [English] | 0.57932 | 0.57386 | -0.00546 | -0.94% |
+| Vidore3IndustrialRetrieval [French] | 0.49848 | 0.48950 | -0.00898 | -1.80% |
+| Vidore3IndustrialRetrieval [German] | 0.51985 | 0.51944 | -0.00041 | -0.08% |
+| Vidore3IndustrialRetrieval [Italian] | 0.50466 | 0.50390 | -0.00076 | -0.15% |
+| Vidore3IndustrialRetrieval [Portuguese] | 0.51784 | 0.52326 | +0.00542 | +1.05% |
+| Vidore3IndustrialRetrieval [Spanish] | 0.52395 | 0.51623 | -0.00772 | -1.47% |
 | Vidore3PharmaceuticalsRetrieval [English] | 0.66048 | 0.66057 | +0.00009 | +0.01% |
+| Vidore3PharmaceuticalsRetrieval [French] | 0.62456 | 0.62353 | -0.00103 | -0.16% |
+| Vidore3PharmaceuticalsRetrieval [German] | 0.63034 | 0.62336 | -0.00698 | -1.11% |
+| Vidore3PharmaceuticalsRetrieval [Italian] | 0.63488 | 0.63439 | -0.00049 | -0.08% |
+| Vidore3PharmaceuticalsRetrieval [Portuguese] | 0.63929 | 0.63735 | -0.00194 | -0.30% |
+| Vidore3PharmaceuticalsRetrieval [Spanish] | 0.64376 | 0.63614 | -0.00762 | -1.18% |
 | Vidore3PhysicsRetrieval [English] | 0.46403 | 0.46300 | -0.00103 | -0.22% |
+| Vidore3PhysicsRetrieval [French] | 0.46361 | 0.46243 | -0.00118 | -0.25% |
+| Vidore3PhysicsRetrieval [German] | 0.45473 | 0.46366 | +0.00893 | +1.96% |
+| Vidore3PhysicsRetrieval [Italian] | 0.46990 | 0.45841 | -0.01149 | -2.45% |
+| Vidore3PhysicsRetrieval [Portuguese] | 0.46163 | 0.46000 | -0.00163 | -0.35% |
+| Vidore3PhysicsRetrieval [Spanish] | 0.46816 | 0.46955 | +0.00139 | +0.30% |
 | VidoreArxivQARetrieval [English] | 0.90576 | 0.90194 | -0.00382 | -0.42% |
 | VidoreDocVQARetrieval [English] | 0.66296 | 0.66667 | +0.00371 | +0.56% |
 | VidoreInfoVQARetrieval [English] | 0.94312 | 0.94207 | -0.00105 | -0.11% |
@@ -55,21 +85,19 @@
 | VidoreTabfquadRetrieval [English] | 0.94329 | 0.94087 | -0.00242 | -0.26% |
 | VidoreTatdqaRetrieval [English] | 0.79867 | 0.79347 | -0.00520 | -0.65% |
 |-----------|----------|-----------|------------|----------|
-| **Average** | **0.70023** | **0.69611** | **-0.00411** | **-0.59%** |
+| **Average** | **0.63023** | **0.62670** | **-0.00354** | **-0.56%** |
 
 ## Summary
 
 - **Benchmark files (Original):** 22
 - **Benchmark files (Quantized):** 22
-- **Total entries evaluated:** 41
-- **Entries with improvement:** 10
-- **Entries with degradation:** 30
+- **Total entries evaluated:** 71
+- **Entries with improvement:** 18
+- **Entries with degradation:** 52
 - **Unchanged:** 1
-
-**Warning:** 30 entries only in original: Vidore3FinanceEnRetrieval [French], Vidore3FinanceEnRetrieval [German], Vidore3FinanceEnRetrieval [Italian], Vidore3FinanceEnRetrieval [Portuguese], Vidore3FinanceEnRetrieval [Spanish], Vidore3FinanceFrRetrieval [French], Vidore3FinanceFrRetrieval [German], Vidore3FinanceFrRetrieval [Italian], Vidore3FinanceFrRetrieval [Portuguese], Vidore3FinanceFrRetrieval [Spanish], Vidore3HrRetrieval [French], Vidore3HrRetrieval [German], Vidore3HrRetrieval [Italian], Vidore3HrRetrieval [Portuguese], Vidore3HrRetrieval [Spanish], Vidore3IndustrialRetrieval [French], Vidore3IndustrialRetrieval [German], Vidore3IndustrialRetrieval [Italian], Vidore3IndustrialRetrieval [Portuguese], Vidore3IndustrialRetrieval [Spanish], Vidore3PharmaceuticalsRetrieval [French], Vidore3PharmaceuticalsRetrieval [German], Vidore3PharmaceuticalsRetrieval [Italian], Vidore3PharmaceuticalsRetrieval [Portuguese], Vidore3PharmaceuticalsRetrieval [Spanish], Vidore3PhysicsRetrieval [French], Vidore3PhysicsRetrieval [German], Vidore3PhysicsRetrieval [Italian], Vidore3PhysicsRetrieval [Portuguese], Vidore3PhysicsRetrieval [Spanish]
 
 ### Overall Scores
 
 | Metric | Original | Quantized | Change |
 |--------|----------|-----------|--------|
-| **Average NDCG@5** | 0.70023 | 0.69611 | -0.59% |
+| **Average NDCG@5** | 0.63023 | 0.62670 | -0.56% |

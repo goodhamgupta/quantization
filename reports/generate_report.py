@@ -15,10 +15,14 @@ MODEL_VARIANTS = {
     "8B": {
         "original": "results_8B_original",
         "quantized": "results_8B_w4a16_autoawq_quantized",
+        "original_memory_gb": 16.7,
+        "quantized_memory_gb": 7.9,
     },
     "4B": {
         "original": "results_4B_original",
         "quantized": "results_4B_w4a16_autoawq_quantized",
+        "original_memory_gb": 8.4,
+        "quantized_memory_gb": 3.5,
     },
 }
 
@@ -80,6 +84,8 @@ def generate_report(
     quantized_folder: Path,
     english_only: bool = False,
     model_size: str = "8B",
+    original_memory_gb: float = 0.0,
+    quantized_memory_gb: float = 0.0,
 ) -> str:
     """Generate markdown report comparing original and quantized models.
 
@@ -88,6 +94,8 @@ def generate_report(
         quantized_folder: Path to quantized model results
         english_only: If True, only include English language results
         model_size: Model size variant (e.g., "8B", "4B")
+        original_memory_gb: Memory usage of original model in GB
+        quantized_memory_gb: Memory usage of quantized model in GB
     """
     original_meta = load_model_meta(original_folder)
     quantized_meta = load_model_meta(quantized_folder)
@@ -126,7 +134,7 @@ def generate_report(
         f"| **Parameters** | {original_meta['n_parameters'] / 1e9:.1f}B | {quantized_meta['n_parameters'] / 1e9:.1f}B |"
     )
     lines.append(
-        f"| **Memory Usage** | {original_meta['memory_usage_mb']:.0f} MB | {quantized_meta['memory_usage_mb']:.0f} MB |"
+        f"| **Memory Usage** | {original_memory_gb:.1f} GB | {quantized_memory_gb:.1f} GB |"
     )
     lines.append(
         f"| **Release Date** | {original_meta['release_date']} | {quantized_meta['release_date']} |"
@@ -256,8 +264,16 @@ def generate_reports_for_variant(
     print(f"Generating reports for {model_size} model variant")
     print(f"{'=' * 80}")
 
+    original_memory_gb = config["original_memory_gb"]
+    quantized_memory_gb = config["quantized_memory_gb"]
+
     english_report = generate_report(
-        original_folder, quantized_folder, english_only=True, model_size=model_size
+        original_folder,
+        quantized_folder,
+        english_only=True,
+        model_size=model_size,
+        original_memory_gb=original_memory_gb,
+        quantized_memory_gb=quantized_memory_gb,
     )
     english_output_path = reports_dir / f"comparison_report_{model_size}_english.md"
     with open(english_output_path, "w") as f:  # noqa: PTH123
@@ -265,7 +281,12 @@ def generate_reports_for_variant(
     print(f"English-only report generated: {english_output_path}")
 
     all_langs_report = generate_report(
-        original_folder, quantized_folder, english_only=False, model_size=model_size
+        original_folder,
+        quantized_folder,
+        english_only=False,
+        model_size=model_size,
+        original_memory_gb=original_memory_gb,
+        quantized_memory_gb=quantized_memory_gb,
     )
     all_langs_output_path = (
         reports_dir / f"comparison_report_{model_size}_all_languages.md"

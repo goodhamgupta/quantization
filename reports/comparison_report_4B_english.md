@@ -4,10 +4,10 @@
 
 | Property | Original | Quantized |
 |----------|----------|-----------|
-| **Model Name** | TomoroAI/tomoro-colqwen3-embed-4b | shubhamg2208/tomoro-ai-colqwen3-embed-4b-autoawq-w4a16 |
+| **Model Name** | TomoroAI/tomoro-colqwen3-embed-4b | TomoroAI/tomoro-colqwen3-embed-4b |
 | **Parameters** | 4.0B | 4.0B |
-| **Memory Usage** | 8466 MB | 8466 MB |
-| **Release Date** | 2025-11-26 | 2025-12-12 |
+| **Memory Usage** | 8.4 GB | 3.5 GB |
+| **Release Date** | 2025-11-26 | 2025-11-26 |
 
 ## NDCG@5 Performance Comparison
 

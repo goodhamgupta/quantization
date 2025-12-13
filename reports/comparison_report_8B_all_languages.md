@@ -6,7 +6,7 @@
 |----------|----------|-----------|
 | **Model Name** | TomoroAI/tomoro-colqwen3-embed-8b | shubhamg2208/tomoro-ai-colqwen3-embed-8b-autoawq-w4a16 |
 | **Parameters** | 8.0B | 8.0B |
-| **Memory Usage** | 16724 MB | 16724 MB |
+| **Memory Usage** | 16.7 GB | 7.9 GB |
 | **Release Date** | 2025-11-26 | 2025-12-12 |
 
 ## NDCG@5 Performance Comparison
